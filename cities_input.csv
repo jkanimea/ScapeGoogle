@@ -1,0 +1,5 @@
+City,State,Latitude,Longitude,Timezone
+San Francisco,CA,37.7749,-122.4194,PDT
+New York,NY,40.712776,-74.005974,EST
+Los Angeles,CA,34.052235,-118.243683,PDT
+# Add more entries with city, state, latitude, longitude, and other parameters as needed
