@@ -12,14 +12,15 @@ load_dotenv()
 # Replace with your Google Cloud API Key
 api_key = os.getenv("GOOGLE_CLOUD_API_KEY")
 radius = int(os.getenv("Radius"))
-place_type = os.getenv("Niche")
+niche = os.getenv("Niche")
 max_reviews = int(os.getenv("Max_reviews"))
 max_results = int(
     os.getenv("Max_results")
 )  # Define the parameters for the Places API request
 endpointNearbySearch = os.getenv("GoogleAPIPlaceNearbySearchEndpoint")
 endpointDetails = os.getenv("GoogleAPIPlaceDetailsEndpoint")
-
+fileOutputMode = int(os.getenv("FileOutputMode"))
+locations_input_file = os.getenv("Locations_input_file")
 
 def ensure_data_folder_exists():
     # Check if the "data" folder exists, and create it if not
@@ -51,19 +52,21 @@ def get_email_from_website(website_url):
     return "N/A"  # Default if no email found or in case of an error
 
 
-def get_places_in_area(city, state, url, timezone, processed_count, max_results):
+def get_places_in_area(
+    city, state, url, timezone, processed_count, max_results, writer=None
+):
     page_token = None  # Initialize a page token
-    # Get the current time and format it as "HH_mm_a" (e.g., 7_41_PM)
-    current_time = datetime.now().strftime("%I_%M_%p")
     data_folder = os.getenv("Data_folder")
-    output_file_base = f"{timezone}_{place_type}_in_{city}_{state}_{current_time}"
 
-    output_file_name = os.path.join(
-        data_folder, f"{output_file_base}_({processed_count}).csv"
-    )
+    # Check if a writer is provided. If not, create a new CSV file.
+    if writer is None:
+        current_time = datetime.now().strftime("%I_%M_%p")
+        output_file_base = f"{timezone}_{niche}_in_{city}_{state}_{current_time}"
+        output_file_name = os.path.join(
+            data_folder, f"{output_file_base}_({processed_count}).csv"
+        )
 
-    # Create a CSV file to write the data
-    with open(output_file_name, mode="w", newline="", encoding="utf-8") as csv_file:
+        csv_file = open(output_file_name, mode="w", newline="", encoding="utf-8")
         fieldnames = [
             "Business Name",
             "Address",
@@ -75,8 +78,11 @@ def get_places_in_area(city, state, url, timezone, processed_count, max_results)
         ]
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         writer.writeheader()
+        own_file = True
+    else:
+        own_file = False
 
-        while max_results > 0:
+    while max_results > 0:
             # Send the API request with the page token if available
             if page_token:
                 next_url = f"{url}&pagetoken={page_token}"
@@ -143,15 +149,20 @@ def get_places_in_area(city, state, url, timezone, processed_count, max_results)
                 # If there's no next page, break the loop
                 if not next_page_token:
                     break
+
                 page_token = next_page_token
             else:
                 print(f"Error: {response.status_code} - {response.text}")
 
-    # Update the output file name with the final processed count after the loop
-    final_output_file_name = os.path.join(
-        data_folder, f"{output_file_base}_({processed_count}).csv"
-    )
-    os.rename(output_file_name, final_output_file_name)
+    # Close the file if this function created its own file
+    if own_file:
+        csv_file.close()
+
+        # Update the output file name with the final processed count after the loop
+        final_output_file_name = os.path.join(
+            data_folder, f"{output_file_base}_({processed_count}).csv"
+        )
+        os.rename(output_file_name, final_output_file_name)
 
     # Return the processed count
     return processed_count
@@ -160,23 +171,50 @@ def get_places_in_area(city, state, url, timezone, processed_count, max_results)
 def process_locations_input(input_file):
     with open(input_file, mode="r") as csv_file:
         csv_reader = csv.DictReader(csv_file)
-        for row in csv_reader:
-            # Skip lines that start with #
-            if not row["City"].strip().startswith("#"):
-                city = row["City"]
-                state = row["State"]
-                latitude = row["Latitude"]
-                longitude = row["Longitude"]
-                timezone = row["Timezone"]
+        data_folder = os.getenv("Data_folder")
+        processed_count = 0
 
-    # Create the API request URL
-    url = f"{endpointNearbySearch}?location={latitude},{longitude}&radius={radius}&type={place_type}&key={api_key}"
+        if fileOutputMode == 1:
+            output_file_base = f"combined_{niche}"
+            output_file_name = os.path.join(data_folder, f"{output_file_base}_({processed_count}).csv")
+            with open(
+                output_file_name, mode="w", newline="", encoding="utf-8"
+            ) as combined_csv_file:
+                fieldnames = [
+                    "Business Name",
+                    "Address",
+                    "Phone Number",
+                    "Website",
+                    "Email",
+                    "Number of Reviews",
+                    "Timezone",
+                ]
+                writer = csv.DictWriter(combined_csv_file, fieldnames=fieldnames)
+                writer.writeheader()
 
-    processed_count = 0  # Initialize the processed count for each location
-    get_places_in_area(city, state, url, timezone, processed_count, max_results)
+                for row in csv_reader:
+                    if not row["City"].strip().startswith("#"):
+                        processed_count= process_row(row, processed_count, writer)
+                        
+            final_output_file_name = os.path.join(
+            data_folder, f"{output_file_base}_({processed_count}).csv")
+            os.rename(output_file_name, final_output_file_name)       
+        elif fileOutputMode == 2:
+            for row in csv_reader:
+                if not row["City"].strip().startswith("#"):
+                    processed_count = process_row(row, processed_count)            
+      
+def process_row(row, processed_count, writer=None):
+    city = row["City"]
+    state = row["State"]
+    latitude = row["Latitude"]
+    longitude = row["Longitude"]
+    timezone = row["Timezone"]
+    url = f"{endpointNearbySearch}?location={latitude},{longitude}&radius={radius}&type={niche}&key={api_key}"
+    processed_count = get_places_in_area(city, state, url, timezone, processed_count, max_results, writer)
+    return processed_count
 
 
 if __name__ == "__main__":
     ensure_data_folder_exists()  # Ensure the "data" folder exists
-    locations_input_file = "cities_input.csv"
     process_locations_input(locations_input_file)
