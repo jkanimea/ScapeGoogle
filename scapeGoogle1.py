@@ -23,10 +23,17 @@ fileOutputMode = int(os.getenv("FileOutputMode"))
 locations_input_file = os.getenv("Locations_input_file")
 
 def ensure_data_folder_exists():
+    
+     # Get the current date and time formatted as YY-MM-DD_hh-mm-ss
+    timestamp = datetime.now().strftime("%y-%m-%d_%I-%M-%p").lower()
     # Check if the "data" folder exists, and create it if not
-    data_folder = os.getenv("Data_folder")
-    if not os.path.exists(data_folder):
-        os.makedirs(data_folder)
+    data_folder = os.path.join(os.getenv("Data_folder"), f"data_{timestamp}")
+    try:
+        if not os.path.exists(data_folder):
+            os.makedirs(data_folder)
+    except OSError as e:
+        print(f"Error creating data folder: {e}")
+        exit(1)  # Exit the script if the data folder can't be created
 
 
 def get_email_from_website(website_url):
@@ -202,7 +209,34 @@ def process_locations_input(input_file):
         elif fileOutputMode == 2:
             for row in csv_reader:
                 if not row["City"].strip().startswith("#"):
-                    processed_count = process_row(row, processed_count)            
+                    process_row(row, processed_count)
+        elif fileOutputMode == 3:
+
+            writers = {}  # Dictionary to hold writers for each timezone
+            for row in csv_reader:
+                if not row["City"].strip().startswith("#"):
+                    timezone = row["Timezone"]
+                    if timezone not in writers:
+                        writers[timezone] = create_timezone_writer(timezone, data_folder, niche)
+                    processed_count = process_row(row, processed_count, writers[timezone]['writer'])                    
+                    
+            # Close all the CSV files
+            for writer_info in writers.values():
+                writer_info['file'].close()                  
+
+def create_timezone_writer(timezone, data_folder, niche):
+    output_file_base = f"{timezone}_{niche}"
+    output_file_name = os.path.join(data_folder, f"{output_file_base}.csv")
+
+    csv_file = open(output_file_name, mode="a", newline="", encoding="utf-8")
+    fieldnames = [
+        "Business Name", "Address", "Phone Number", "Website",
+        "Email", "Number of Reviews", "Timezone",
+    ]
+    writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+    writer.writeheader()
+
+    return {"writer": writer, "file": csv_file}
       
 def process_row(row, processed_count, writer=None):
     city = row["City"]
@@ -216,5 +250,8 @@ def process_row(row, processed_count, writer=None):
 
 
 if __name__ == "__main__":
+   try: 
     ensure_data_folder_exists()  # Ensure the "data" folder exists
     process_locations_input(locations_input_file)
+   except Exception as e:
+        print(f"An unexpected error occurred: {e}")
